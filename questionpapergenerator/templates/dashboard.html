@@ -22,6 +22,7 @@
         .navhead {
             background-color: #343a40;
         }
+ 
     </style>
 </head>
 
@@ -86,16 +87,21 @@
                     <div class="card">
                         <div class="card-body">
                             <h5 class="card-title">{{ subject }}</h5>
-                            <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSawQX7zDlEY58NC1v4m07hHJlHSZwvHqG00A&usqp=CAU" class="card-img-top" alt="Subject Image" width="50" height="200">
+                            <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSawQX7zDlEY58NC1v4m07hHJlHSZwvHqG00A&usqp=CAU"class="card-img-top" alt="Subject Image" width="50" height="200">
                             <br>
-                            <a href="{{ url_for('my_pdf_documents',subject_name=subject) }}" class="btn btn-primary"> Go to Subject </a>
-                            
+                            <div class="d-flex justify-content-between align-items-center">
+                                <a href="{{ url_for('my_pdf_documents', subject_name=subject) }}" class="btn btn-primary">Go to Subject</a>
+                                <form method="post" action="{{ url_for('remove_subject') }}">
+                                    <input type="hidden" name="subject_name" value="{{ subject }}">
+                                    <button type="submit" class="btn btn-danger">Remove Subject</button>
+                                </form>
+                            </div>
                         </div>
                     </div>
                     <br>
                 </div>
                 {% endfor %}
-            </div>
+            </div>                     
         </div>
     </section>
     <!-- Add Subject Modal -->

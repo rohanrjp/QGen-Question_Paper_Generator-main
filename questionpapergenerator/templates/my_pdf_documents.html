@@ -74,6 +74,7 @@
         height: 50px;
         margin: 5px;
         }
+         
     </style>
 </head>
 <body>
@@ -115,7 +116,7 @@
                             </div>
                             <div class="view-pdf-remove-file">
                                 <a href="/view_pdf/{{ pdf_doc._id }}" class="btn btn-primary view-pdf-button">View PDF</a>
-                                <form action="/remove_pdf/{{ pdf_doc._id }}/subject_name" method="post">
+                                <form action="/remove_pdf/{{ pdf_doc._id }}/{{subject_name}}" method="post">
                                     <button type="submit" class="btn btn-danger">Delete PDF</button>
                                 </form>
                             </div>
@@ -140,6 +141,17 @@
         <br>
         <br>
         <br>
+        <br>
+        <br>
+        <br>
+        <br>
+        <br>
+        <br>
+        <br>
+        <br>
+        <br>
+        <br>
+        <br>  
       <div class="footer-copyright text-center py-3">
         <h6>Copyright@2023<br>QGEN|All Rights Reserved.</h6>
       </div>

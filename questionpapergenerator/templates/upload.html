@@ -8,7 +8,7 @@
         body {
             background-color: #e6e6fa;
         }
-
+        
         .navbar {
             background-color: #343a40;
         }
@@ -34,6 +34,7 @@
             background-color: #f2f2f2;
             border-color: #f2f2f2;
         }
+        
     </style>
     <script>
         function handleFileInput() {
@@ -50,14 +51,15 @@
         }
        
         function generatePdf() {
-            fetch('/generate_pdf')
-                .then(response => response.text())
-                .then(data => {
-                 alert(data);
-                })
-                .catch(error => {
-                 console.error('Error:', error);
-                });
+            var subjectName = '{{ subject_name }}'; // Assuming subject_name is passed to the template
+            var question_type;
+            if(document.getElementById('subjective').checked)
+                questionType = 'subjective';
+            else if (document.getElementById('mcq').checked)
+                questionType = 'mcq';
+            else
+                question_type=null;
+            window.location.href = '/generate_pdf/' + subjectName + '?question_type=' + questionType;
         }
         
     </script>
@@ -112,7 +114,13 @@
                 <div class="card card-custom">
                     <div class="card-body">
                         <div class="mt-3">
-                            <button class="btn btn-primary" style="background-color: green;" onclick="window.location.href='{{ url_for('generate_pdf',subject_name=subject_name) }}'">Generate pdf</button>
+                            <input type="radio" id="subjective" name="question_type" value="subjective">
+                            <label for="subjective"> Subjective </label>
+                            <input type="radio" id="mcq" name="question_type" value="mcq">
+                            <label for="mcq">MCQ</label>
+                        </div>
+                        <div class="mt-3">
+                            <button class="btn btn-primary" style="background-color: green;" onclick="generatePdf()">Generate pdf</button>
                         </div>
                     </div>
                 </div>
@@ -128,54 +136,39 @@
                 </div>
             </div>
 
-            <div class="col-md-4">
-                <div class="card card-custom">
-                    <div class="card-body">
-                        <h5 class="card-title">PreProcessed</h5>
-                        <textarea class="form-control" rows="15">{{text2}}</textarea>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col-md-4">
-                <div class="card card-custom">
-                    <div class="card-body">
-                        <h5 class="card-title">Summarized</h5>
-                        <textarea class="form-control" rows="15">{{text3}}</textarea>
-                    </div>
-                </div>
-            </div>  
-         
-            <div class="col-md-4">
-                <div class="card card-custom">
-                    <div class="card-body">
-                        <h5 class="card-title">Keywords</h5>
-                        <textarea class="form-control" rows="15">{{text4}}</textarea>
-                    </div>
-                </div>
-            </div>              
-
             <!-- Column 3 -->
             <div class="col-md-4">
                 <div class="card card-custom">
                     <div class="card-body">
                         <h5 class="card-title">QUESTIONS</h5>
-                        <textarea class="form-control" rows="15"id="questionTextarea">{% for question in text5 %}
+                        <textarea class="form-control" rows="15"id="questionTextarea">{% for question in text3 %}
     {{ loop.index }}. {{ question }}
     {% endfor %}
                         </textarea>
                     </div>
                 </div>
             </div>
+
         </div>
     </div>
     <footer class="page-footer font-small blue">
-      <div class="footer-copyright text-center py-3">
-        <h6>Copyright@2023<br>QGEN|All Rights Reserved.</h6>
-      </div>
-      <!-- Copyright -->
-    
+        <br>
+        <br>
+        <br>
+        <br>
+        <br>
+        <br>
+        <br>
+        <br>
+        <br>
+        <br>
+        <br>
+        <br>
+        <div class="footer-copyright text-center py-3">
+            <h6>Copyright@2023<br>QGEN|All Rights Reserved.</h6>
+        </div>
     </footer>
     <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
 </body>
 </html>
+

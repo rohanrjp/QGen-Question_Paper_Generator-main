@@ -7,11 +7,6 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import inch
 import torch,random
-import nltk
-from nltk.corpus import wordnet as wn
-nltk.download('stopwords')
-from nltk.corpus import stopwords
-from nltk.tokenize import sent_tokenize
 import datetime
 import os
 from reportlab.lib import colors
@@ -21,14 +16,8 @@ from io import BytesIO
 import io
 from bson import ObjectId
 from werkzeug.utils import secure_filename
-from nltk.corpus import stopwords
-import string
-import pke
-import traceback
-from flashtext import KeywordProcessor
-import nltk
-import ssl
-from rake_nltk import Rake
+import random
+
 
 #Extraction from PDF
 def extract_text_from_pdf(file_path):
@@ -39,122 +28,33 @@ def extract_text_from_pdf(file_path):
    return text
 
 
-#Preprocessing of text
+from nltk.tokenize import word_tokenize
+import re
+
 def preprocess_text(text, segment_length=1700):
-   # Remove leading and trailing whitespace
-   text = text.strip()
+    # Remove leading and trailing whitespace
+    text = text.strip()
 
+    # Replace bullet points with a space
+    text = re.sub(r'\s*•\s*', ' ', text)
 
-   # Replace bullet points with a space
-   text = re.sub(r'\s*•\s*', ' ', text)
+    # Replace newlines and multiple whitespaces with a single space
+    text = ' '.join(text.split())
 
+    # Tokenize the text using NLTK's word_tokenize function
+    tokens = word_tokenize(text)
 
-   # Replace newlines and multiple whitespaces with a single space
-   text = ' '.join(text.split())
-
-
-   # Split the text into segments of specified length
-   segments = [text[i:i+segment_length] for i in range(0, len(text), segment_length)]
-
-
-   return segments
-
-
-#Code for summarization
-from transformers import T5ForConditionalGeneration,T5TokenizerFast
-summary_model = T5ForConditionalGeneration.from_pretrained('t5-base')
-summary_tokenizer = T5TokenizerFast.from_pretrained('t5-base')
-
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-summary_model = summary_model.to(device)
-
-
-def summarizer(text_segments, model, tokenizer):
-   summaries = []
-
-
-   for text_segment in text_segments:
-       text = text_segment.strip().replace("\n", " ")
-       text = "summarize: " + text
-       max_len = 512
-       encoding = tokenizer.encode_plus(text, max_length=max_len, pad_to_max_length=False, truncation=True, return_tensors="pt").to(device)
-
-
-       input_ids, attention_mask = encoding["input_ids"], encoding["attention_mask"]
-
-
-       outs = model.generate(input_ids=input_ids,
-                             attention_mask=attention_mask,
-                             early_stopping=True,
-                             num_beams=3,
-                             num_return_sequences=1,
-                             no_repeat_ngram_size=2,
-                             min_length=75,
-                             max_length=300)
-
-
-       dec = [tokenizer.decode(ids, skip_special_tokens=True) for ids in outs]
-       summary = dec[0]
-       summary = summary.strip()
-       summaries.append(summary)
-
-
-   return summaries
-
-
-#Keyword Extraction
-
-
-def get_nouns_multipartite(content):
-    out=[]
-    try:
-        extractor = pke.unsupervised.MultipartiteRank()
-        extractor.load_document(input=content,language='en')
-        #    not contain punctuation marks or stopwords as candidates.
-        pos = {'PROPN','NOUN'}
-        #pos = {'PROPN','NOUN'}
-        stoplist = list(string.punctuation)
-        stoplist += ['-lrb-', '-rrb-', '-lcb-', '-rcb-', '-lsb-', '-rsb-']
-        stoplist += stopwords.words('english')
-        # extractor.candidate_selection(pos=pos, stoplist=stoplist)
-        extractor.candidate_selection(pos=pos)
-        # 4. build the Multipartite graph and rank candidates using random walk,
-        #    alpha controls the weight adjustment mechanism, see TopicRank for
-        #    threshold/method parameters.
-        extractor.candidate_weighting(alpha=1.1,
-                                      threshold=0.75,
-                                      method='average')
-        keyphrases = extractor.get_n_best(n=15)
-
-
-        for val in keyphrases:
-            out.append(val[0])
-    except:
-        out = []
-        traceback.print_exc()
-
-    return out
-
-def get_keywords(summary_texts):
-    keyword_processor = KeywordProcessor()
-
-    keywords_found = []
-    for summarized_text in summary_texts:
-        keywords_found = keyword_processor.extract_keywords(summarized_text)
-            
-    return keywords_found
-
-
-
-
-def extract_keywords_rake(text):
-    r = Rake()
-    r.extract_keywords_from_text(text)
-    return r.get_ranked_phrases()
-
-
-
+    # Join tokens into segments of specified length
+    segments = []
+    segment = ''
+    for token in tokens:
+        if len(segment) + len(token) < segment_length:
+            segment += ' ' + token
+        else:
+            segments.append(segment.strip())
+            segment = token
+    segments.append(segment.strip())  # Append the remaining segment
+    return segments
 
 
 
@@ -219,95 +119,260 @@ def hf_run_model(input_list, num_return_sequences=8, num_questions=2, max_sequen
 
    return list(unique_questions)
 
+#Question Answering
+
+from transformers import AutoModelForQuestionAnswering, AutoTokenizer, pipeline
+
+model_name="deepset/roberta-base-squad2"
+
+def get_answers(context, questions, model_name):
+    # Initialize the pipeline outside the function to avoid repeated initialization
+    nlp = pipeline('question-answering', model=model_name, tokenizer=model_name)
+    
+    # Prepare inputs for the pipeline
+    inputs = [{'question': question, 'context': context} for question in questions]
+    
+    # Use the pipeline to get answers for all questions
+    answers = nlp(inputs)
+    
+    # Extract answers from the results
+    answer_texts = [res['answer'] for res in answers]
+    
+    return answer_texts
+
+
+# Distractor Generation
+
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+
+def generate_distractors(context, questions, answers, model_name="potsawee/t5-large-generation-race-Distractor"):
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+    
+    max_length = tokenizer.model_max_length
+    results = []
+
+    for question, answer in zip(questions, answers):
+        input_text = f"{question} {tokenizer.sep_token} {answer} {tokenizer.sep_token} {context}"
+        inputs = tokenizer(input_text, return_tensors="pt", max_length=max_length, truncation=True)
+        outputs = model.generate(**inputs, max_new_tokens=128)
+        distractors = tokenizer.decode(outputs[0], skip_special_tokens=False)
+        distractors = distractors.replace(tokenizer.pad_token, "").replace(tokenizer.eos_token, "")
+        distractors = [y.strip() for y in distractors.split(tokenizer.sep_token)]
+        distractors.append(answer)
+        random.shuffle(distractors)
+        results.append(distractors)
+        
+    for i in range(len(results)):
+        results[i]=list(set(results[i]))
+
+    return results
 
 #Making PDF
 
 
-def convert_list_to_pdf_with_template(data_list, output_file,subject_name):
-   # Create the PDF canvas
-   c = canvas.Canvas(output_file, pagesize=letter)
+def subjective_template(data_list,answers_list, output_file,subject_name):
+    # Create the PDF canvas
+    c = canvas.Canvas(output_file, pagesize=letter)
+
+    # Add the template or background image
+    template_path = 'template.png'
+    c.drawImage(template_path, 0, 0, width=letter[0], height=letter[1])
+
+    # Set up paragraph styles
+    styles = getSampleStyleSheet()
+    paragraph_style = ParagraphStyle(
+        'normal',
+        parent=styles['Normal'],
+        textColor=colors.black,
+        fontSize=12,
+        leading=16  # Adjust the leading for more spacing between lines
+    )
+
+    # Set the font and size
+    c.setFont("Helvetica-Bold", 16)
+    text_width = c.stringWidth(subject_name, "Helvetica-Bold", 16)
+    x_position = (letter[0] - text_width) / 2
+    c.drawCentredString(letter[0] / 2, 575, subject_name)
+    c.line(x_position, 570, x_position + text_width, 570)  # Draw underline
+    c.setFont("Helvetica", 12)
 
 
-   # Set the font and size
-   c.setFont("Helvetica", 12)
+    # Write the list elements to the PDF
+    y = 550  # Starting y position
+    index = 1
+    spacing = 20  # Fixed spacing between paragraphs
+
+    for item in data_list:
+        text = f"{index}) {item}"
+        p = Paragraph(text, style=paragraph_style)
+        p.wrapOn(c, 400, 0)
+
+        # Check if there's enough space on the page for the paragraph
+        if y - p.height < 50:
+            c.showPage()  # Start a new page
+            y = 750  # Reset the y position to the top of the new page
+
+        p.drawOn(c, 100, y-p.height)
+        y -= p.height + spacing  # Adjust the spacing between paragraphs
+        index += 1
+
+    #answer key
+    c.showPage()
+    c.setFont("Helvetica-Bold", 16)
+    text_width = c.stringWidth("ANSWER KEY", "Helvetica-Bold", 16)
+    x_position = (letter[0] - text_width) / 2
+    c.drawCentredString(letter[0] / 2, 750, "ANSWER KEY")
+    c.line(x_position, 745, x_position + text_width, 745)  # Draw underline
+    c.setFont("Helvetica", 12)
+
+    y = 700  # Starting y position
+    spacing = 20  # Fixed spacing between answers
+
+    for index, answer in enumerate(answers_list, start=1):
+        text = f"{index}) {answer}"
+        p = Paragraph(text, style=paragraph_style)
+        p.wrapOn(c, 400, 0)
+
+        # Check if there's enough space on the page for the answer paragraph
+        if y - p.height < 50:
+            c.showPage()  # Start a new page
+            y = 750  # Reset the y position to the top of the new page
+
+        p.drawOn(c, 100, y - p.height)
+        y -= p.height + spacing  # Adjust the spacing between answers 
+
+    c.save()
+
+    # Save the PDF file into MongoDB
+    with open(output_file, 'rb') as pdf_file:
+        pdf_data = pdf_file.read()
+
+    username = session.get('username')  # Get the username from session or any relevant source
+
+    user = users_collection.find_one({'username': username})  # Retrieve the user document from MongoDB
+
+    if user:
+        user_id = user['_id']  # Assuming the user ID is stored in the '_id' field
+        timestamp = datetime.datetime.now()  # Generate a timestamp
+
+        filename = session.get('file_name')
+        file_name = f"subjective_{filename}"
+        
+
+        pdf_document = {
+            "user_id": user_id,
+            "timestamp": timestamp,
+            "file_name": file_name,
+            "pdf_file": pdf_data,
+            "subject_name": subject_name
+        }
+
+        pdf_collection.insert_one(pdf_document)
+        print("PDF saved to MongoDB successfully.")
+    else:
+        print("User not found. PDF not saved.")
 
 
-   # Add the template or background image
-   template_path = 'template.png'
-   c.drawImage(template_path, 0, 0, width=letter[0], height=letter[1])
 
 
-   # Set up paragraph styles
-   styles = getSampleStyleSheet()
-   paragraph_style = ParagraphStyle(
-       'normal',
-       parent=styles['Normal'],
-       textColor=colors.black,
-       fontSize=12,
-       leading=16  # Adjust the leading for more spacing between lines
-   )
+def mcq_template(questions,answers_list, options, output_file, subject_name):
+    c = canvas.Canvas(output_file, pagesize=letter)
+    # Set the font and size
+    c.setFont("Helvetica", 12)
+    # Add the template or background image
+    template_path = 'template.png'
+    c.drawImage(template_path, 0, 0, width=letter[0], height=letter[1])
+    # Set up paragraph styles
+    styles = getSampleStyleSheet()
+    paragraph_style = ParagraphStyle(
+        'normal',
+        parent=styles['Normal'],
+        textColor=colors.black,
+        fontSize=12,
+        leading=16  # Adjust the leading for more spacing between lines
+    )
+    # Write the list elements to the PDF
+    y = 550  # Starting y position
+    index = 1
+    spacing = 20  # Fixed spacing between paragraphs
+    for question, option_list in zip(questions, options):
+        # Print the question
+        question_text = f"{index}) {question}"
+        question_paragraph = Paragraph(question_text, style=paragraph_style)
+        question_paragraph.wrapOn(c, 400, 0)
+        # Check if there's enough space on the page for the question paragraph
+        if y - question_paragraph.height < 50:
+            c.showPage()  # Start a new page
+            y = 750  # Reset the y position to the top of the new page
+        question_paragraph.drawOn(c, 100, y-question_paragraph.height)
+        y -= question_paragraph.height + spacing  # Adjust the spacing between paragraphs
+        # Check remaining space for options
+        remaining_space = y - (len(option_list) * (question_paragraph.height + spacing))
+        if remaining_space < 40:
+            c.showPage()  # Start a new page
+            y = 750  # Reset the y position to the top of the new page
+        # Print options
+        option_index = 1
+        for option in option_list:
+            option_text = f"{chr(96 + option_index)}) {option}"  # Using ASCII code to generate options (a, b, c, ...)
+            option_paragraph = Paragraph(option_text, style=paragraph_style)
+            option_paragraph.wrapOn(c, 400, 0)
+            # Check if there's enough space on the page for the option paragraph
+            if y - option_paragraph.height < 50:
+                c.showPage()  # Start a new page
+                y = 750  # Reset the y position to the top of the new page
+            option_paragraph.drawOn(c, 120, y-option_paragraph.height)
+            y -= option_paragraph.height + spacing  # Adjust the spacing between paragraphs
+            option_index += 1
+        index += 1
+    
+    c.showPage()
+    c.setFont("Helvetica-Bold", 16)
+    text_width = c.stringWidth("ANSWER KEY", "Helvetica-Bold", 16)
+    x_position = (letter[0] - text_width) / 2
+    c.drawCentredString(letter[0] / 2, 750, "ANSWER KEY")
+    c.line(x_position, 745, x_position + text_width, 745)  # Draw underline
+    c.setFont("Helvetica", 12)
 
+    y = 700  # Starting y position
+    spacing = 20  # Fixed spacing between answers
 
-   # Write the list elements to the PDF
-   y = 550  # Starting y position
-   index = 1
-   spacing = 20  # Fixed spacing between paragraphs
+    for index, answer in enumerate(answers_list, start=1):
+        text = f"{index}) {answer}"
+        p = Paragraph(text, style=paragraph_style)
+        p.wrapOn(c, 400, 0)
 
+        # Check if there's enough space on the page for the answer paragraph
+        if y - p.height < 50:
+            c.showPage()  # Start a new page
+            y = 750  # Reset the y position to the top of the new page
 
-   for item in data_list:
-       text = f"{index}) {item}"
-       p = Paragraph(text, style=paragraph_style)
-       p.wrapOn(c, 400, 0)
-
-
-       # Check if there's enough space on the page for the paragraph
-       if y - p.height < 50:
-           c.showPage()  # Start a new page
-           y = 750  # Reset the y position to the top of the new page
-
-
-       p.drawOn(c, 100, y-p.height)
-       y -= p.height + spacing  # Adjust the spacing between paragraphs
-       index += 1
-
-
-   # Save the canvas as the final PDF
-   c.save()
-
-
-   # Save the PDF file into MongoDB
-   with open(output_file, 'rb') as pdf_file:
-       pdf_data = pdf_file.read()
-
-
-   username = session.get('username')  # Get the username from session or any relevant source
-
-
-   user = users_collection.find_one({'username': username})  # Retrieve the user document from MongoDB
-
-
-   if user:
-       user_id = user['_id']  # Assuming the user ID is stored in the '_id' field
-       timestamp = datetime.datetime.now()  # Generate a timestamp
-
-
-       file_name = session.get('file_name')
-
-
-       pdf_document = {
-           "user_id": user_id,
-           "timestamp": timestamp,
-           "file_name": file_name,
-           "pdf_file": pdf_data,
-           "subject_name": subject_name
-       }
-
-
-       pdf_collection.insert_one(pdf_document)
-       print("PDF saved to MongoDB successfully.")
-   else:
-       print("User not found. PDF not saved.")
-
+        p.drawOn(c, 100, y - p.height)
+        y -= p.height + spacing  # Adjust the spacing between answers        
+    # Save the canvas as the final PDF
+    c.save()
+    # Save the PDF file into MongoDB
+    with open(output_file, 'rb') as pdf_file:
+        pdf_data = pdf_file.read()
+    username = session.get('username')  # Get the username from session or any relevant source
+    user = users_collection.find_one({'username': username})  # Retrieve the user document from MongoDB
+    if user:
+        user_id = user['_id']  # Assuming the user ID is stored in the '_id' field
+        timestamp = datetime.datetime.now()  # Generate a timestamp
+        filename = session.get('file_name')
+        file_name = f"mcq_{filename}"
+        pdf_document = {
+            "user_id": user_id,
+            "timestamp": timestamp,
+            "file_name": file_name,
+            "pdf_file": pdf_data,
+            "subject_name": subject_name
+        }
+        pdf_collection.insert_one(pdf_document)
+        print("PDF saved to MongoDB successfully.")
+    else:
+        print("User not found. PDF not saved.")
 
 
 
@@ -356,6 +421,7 @@ def login():
 @app.route('/logout')
 def logout():
     session.pop('username', None)
+    session.clear()
     flash('Logged out successfully!', 'success')
     return redirect('/')
 
@@ -386,20 +452,27 @@ def upload(subject_name):
            # Continue with text processing
            preprocessed_text = preprocess_text(extracted_text, segment_length=1700)
            print(len(preprocessed_text))
-           summarized=summarizer(preprocessed_text,summary_model,summary_tokenizer)
-           print(len(summarized))
-           #keyword
-           imp_keywords=extract_keywords_rake(extracted_text)
+           print(preprocessed_text)
+           full_sentence = ' '.join(preprocessed_text)           
            questions = hf_run_model(preprocessed_text, num_return_sequences=8, num_questions=2)
            session['my_list'] = questions
-
+           answers=get_answers(full_sentence,questions,model_name)
+           session['my_list_1'] = answers
+           #print(full_sentence)
+           options = generate_distractors(full_sentence,questions,answers)
+           session['options']=options
 
            for count, ele in enumerate(questions):
-               print(count + 1)
-               print(ele)
-         
+              print(count + 1)
+              print(ele)
+
+           for count, ele in enumerate(answers):
+              print(count + 1)
+              print(ele)
+
+
            return render_template('upload.html', file_name=file.filename, text1=extracted_text,
-                                  text2=preprocessed_text, text3=summarized, text4=imp_keywords, text5=questions,subject_name=subject_name)
+                                  text2=preprocessed_text,text3=questions,subject_name=subject_name)
 
 
    return render_template('upload.html',subject_name=subject_name)
@@ -413,10 +486,24 @@ def upload(subject_name):
 
 @app.route('/generate_pdf/<subject_name>', methods=['GET'])
 def generate_pdf(subject_name):
-   items_1=session['my_list']
-   output_path='output.pdf'
-   convert_list_to_pdf_with_template(items_1,output_path,subject_name=subject_name)
-   return redirect(url_for('my_pdf_documents', subject_name=subject_name))
+    output_path='output.pdf'
+    question_type = request.args.get('question_type')  # Get the value of 'question_type' from the query parameters
+    # Depending on the value of 'question_type', generate the PDF accordingly
+    if question_type == 'mcq':
+        items_1=session['my_list']
+        items_2=session['my_list_1']
+        options=session['options']
+        
+        mcq_template(items_1,items_2, options, output_path, subject_name)
+    elif question_type == 'subjective':
+        items_1=session['my_list']
+        items_2=session['my_list_1']
+        # Generate PDF with subjective questions
+        subjective_template(items_1,items_2,output_path,subject_name)
+    else:
+        # Handle invalid or missing question_type parameter
+        flash("Choose Question Paper type!","danger")
+    return redirect(url_for('my_pdf_documents', subject_name=subject_name))
 
 
 def fetch_pdf_documents_for_user(username,subject_name):
@@ -427,7 +514,6 @@ def fetch_pdf_documents_for_user(username,subject_name):
        return pdf_documents
    else:
        return None
-
 
 
 
