@@ -6,3 +6,4 @@ questionpapergenerator/__pycache__/__init__.cpython-312.pyc
 questionpapergenerator/__pycache__/routes.cpython-312.pyc
 output.pdf
 .gitignore
+.DS_Store
